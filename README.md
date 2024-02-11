@@ -1,8 +1,8 @@
-#Student Details
+# Student Details
 
-SRN:PES1UG21CS640
+# SRN:PES1UG21CS640
 
-Name:Sumukh S Kowndinya
+# Name:Sumukh S Kowndinya
 
 # Multithreaded TCP Server 
 
