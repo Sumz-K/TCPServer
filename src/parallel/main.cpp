@@ -11,7 +11,7 @@
 
 using namespace std;
 
-#define MAX_THREADS 20
+#define MAX_THREADS 100
 
 
 map<string, string> datastore;
@@ -206,7 +206,7 @@ int main(int argc, char*argv[])
 
     bind(server_socket, (struct sockaddr *)&address, sizeof(address));
     
-    if (listen(server_socket, 5) < 0)
+    if (listen(server_socket, 100) < 0)
     {
         perror("Listen failed");
         return -1;
