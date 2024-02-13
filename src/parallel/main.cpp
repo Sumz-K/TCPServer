@@ -11,7 +11,7 @@
 
 using namespace std;
 
-#define MAX_THREADS 100
+#define MAX_THREADS 40
 
 
 map<string, string> datastore;
