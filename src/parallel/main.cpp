@@ -203,6 +203,8 @@ int main(int argc, char*argv[])
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(portno);
+    int reuse=1;
+    setsockopt(server_socket,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
 
     bind(server_socket, (struct sockaddr *)&address, sizeof(address));
     
