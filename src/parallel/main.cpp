@@ -17,14 +17,28 @@ map<string, string> datastore;
 queue<int> job_queue;
 pthread_mutex_t mutex_datastore = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_job_queue = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex_pool = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex_count=PTHREAD_MUTEX_INITIALIZER;
 int actual_count=0;
+
+
+struct Thread{
+    pthread_t id;
+    int fd;
+};
+
+struct Helper{
+    struct Thread *thread_arr;
+    size_t size;
+};
 void *handle_client(void *arg)
 {
     int client_socket = *((int *)arg);
-    char buffer[1024] = {0};
+    char buffer[1024];
     int valread;
     while ((valread = read(client_socket, buffer, sizeof(buffer))) > 0)
     {
+    	printf("in loop\n");
         istringstream request(buffer);
         string tok;
         vector<string> tokens;
@@ -117,13 +131,14 @@ void *handle_client(void *arg)
             }
             else if (request_line.find("END") != -1)
             {
-              	pthread_mutex_lock(&mutex_datastore);
+              	pthread_mutex_lock(&mutex_count);
+              	
                 actual_count--;
 
                 string response="\n";
                 send(client_socket, response.c_str(), response.length(), 0);
                 close(client_socket);
-                pthread_mutex_unlock(&mutex_datastore);
+                pthread_mutex_unlock(&mutex_count);
                 pthread_exit(NULL);
             }
             else
@@ -138,96 +153,89 @@ void *handle_client(void *arg)
     pthread_exit(NULL);
 }
 
-void *thread_pool_helper(void *)
+void *thread_pool_helper(void *args)
 {
-    while (true)
-    {
-        pthread_mutex_lock(&mutex_job_queue);
-        if (!job_queue.empty())
-        {
-            
-            pthread_mutex_lock(&mutex_datastore);
-            if (actual_count < MAX_THREADS)
-            {
-            	int client = job_queue.front();
-            	job_queue.pop();
-            	pthread_mutex_unlock(&mutex_job_queue);
+printf("hey baby");
+    struct Helper *hlp = static_cast<Helper *>(args);
 
-                pthread_t thread;
-                pthread_create(&thread, NULL, &handle_client, &client);
-                actual_count++;
+    struct Thread * thread_pool=hlp->thread_arr;
+    while(true){
+        pthread_mutex_lock(&mutex_job_queue);
+        int is_q_empty=job_queue.empty();
+        pthread_mutex_unlock(&mutex_job_queue);
+        
+        if(!is_q_empty){
+        	for (int i = 0 ; i<MAX_THREADS;i++){
+        		pthread_mutex_lock(&mutex_pool);
+                int threadTerminationStatus = pthread_tryjoin_np(thread_pool[i].id, NULL);
+        		pthread_mutex_unlock(&mutex_pool);
+        		if (threadTerminationStatus == 0){
+            		pthread_mutex_lock(&mutex_job_queue);
+            		int fontele = job_queue.front();
+            		job_queue.pop();
+	            	pthread_mutex_unlock(&mutex_job_queue);
+	            	pthread_mutex_lock(&mutex_pool);
+	            	thread_pool[i].fd = fontele;
+                    pthread_create(&thread_pool[i].id, NULL, &handle_client, &thread_pool[i].fd);
+                    pthread_mutex_unlock(&mutex_pool);
+	            	}
             }
-            pthread_mutex_unlock(&mutex_datastore);
         }
-        else
-        {
-            pthread_mutex_unlock(&mutex_job_queue);
-            usleep(1000);
-        }
+        usleep(10000);      
     }
 }
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char **argv){
     int portno;
-    if (argc != 2)
-    {
+    if (argc != 2){
         fprintf(stderr, "usage: %s <port>\n", argv[0]);
         exit(1);
     }
-
     portno = atoi(argv[1]);
-
-    int server_socket, client_socket;
-    struct sockaddr_in address;
-
-    if ((server_socket = socket(AF_INET, SOCK_STREAM, 0)) == 0)
-    {
-        perror("Socket creation failed");
-        return -1;
-    }
-
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(portno);
-
-    bind(server_socket, (struct sockaddr *)&address, sizeof(address));
-
-    if (listen(server_socket, 100) < 0)
-    {
-        perror("Listen failed");
-        return -1;
-    }
-
-    cout << "Server listening on port " << portno << "..." << endl;
-
-    pthread_t thread_pool_thread;
-    pthread_create(&thread_pool_thread, NULL, &thread_pool_helper, NULL);
-	vector <int> socketss;
-	int counter = 0;
-    while (true)
-    {
-        client_socket = accept(server_socket, NULL, NULL);
-        if (client_socket < 0)
-        {
-            perror("Accept failed");
-            return -1;
-        }
-		socketss.push_back(client_socket);
-        pthread_mutex_lock(&mutex_datastore);
-        if (actual_count < MAX_THREADS)
-        {
-            pthread_t thread;
-            pthread_create(&thread, NULL, &handle_client, &socketss[counter++]);
-            actual_count++;
-        }
+    printf("%d\t", portno);
+    
+    struct sockaddr_in server, client;
+    int client_len, new_socket;
+    client_len = sizeof(server);
+    char buffer[1500];
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    memset((char *)&server, 0, sizeof(server));
+    server.sin_family = AF_INET;
+    server.sin_addr.s_addr = htonl(INADDR_ANY);
+    server.sin_port = htons(portno);
+    bind(sock, (struct sockaddr *)&server, sizeof(server));
+    printf("starting TCP server\n");
+    listen(sock, 100);
+    pthread_t t;
+        
+    int thread_number = MAX_THREADS;
+    struct Thread thread_pool[thread_number];
+    struct Helper threadArgs;
+    threadArgs.thread_arr = thread_pool;
+    threadArgs.size = thread_number;
+    pthread_create(&t,NULL, &thread_pool_helper,&threadArgs);
+    int returnvalue = 0;
+    while (1){
+        new_socket = accept(sock, (struct sockaddr *)&client, (socklen_t *)&client_len);
+        pthread_mutex_lock(&mutex_count);
+        int actno = actual_count++;
+        pthread_mutex_unlock(&mutex_count);
+        if (new_socket >= 0 && actno<thread_number){
+        	pthread_mutex_lock(&mutex_pool);
+        	thread_pool[actno].fd = new_socket;
+            pthread_create(&thread_pool[actno].id, NULL, &handle_client, &thread_pool[actno].fd);
+            pthread_mutex_unlock(&mutex_pool);
+        } 
         else
         {
-            job_queue.push(client_socket);
+	        pthread_mutex_lock(&mutex_job_queue);
+            printf("pushing and printing the content's of queue\n");
+            job_queue.push(new_socket);
+            pthread_mutex_unlock(&mutex_job_queue);
         }
-        pthread_mutex_unlock(&mutex_datastore);
     }
 
-    close(server_socket);
+    close(sock);
+    shutdown(sock, SHUT_RDWR);
     return 0;
 }
