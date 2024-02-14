@@ -11,8 +11,8 @@
 
 using namespace std;
 
-#define MAX_THREADS 10
-
+#define MAX_THREADS 100 
+#define BUFFER_SIZE 1024 
 map<string, string> datastore;
 queue<int> job_queue;
 pthread_mutex_t mutex_datastore = PTHREAD_MUTEX_INITIALIZER;
@@ -22,7 +22,7 @@ int actual_count = 0;
 
 void *handle_client(void *arg) {
     int client_socket = *((int *)arg);
-    char buffer[1024] = {0};
+    char buffer[BUFFER_SIZE] = {0}; 
     int valread;
     while ((valread = read(client_socket, buffer, sizeof(buffer))) > 0) {
         istringstream request(buffer);
@@ -169,8 +169,10 @@ int main(int argc, char *argv[]) {
 
     cout << "Server listening on port " << portno << "..." << endl;
 
-    pthread_t thread_pool_thread;
-    pthread_create(&thread_pool_thread, NULL, &thread_pool_helper, NULL);
+    pthread_t thread_pool_thread[MAX_THREADS]; 
+    for (int i = 0; i < MAX_THREADS; ++i) {
+        pthread_create(&thread_pool_thread[i], NULL, &thread_pool_helper, NULL);
+    }
 
     while (true) {
         client_socket = accept(server_socket, NULL, NULL);
