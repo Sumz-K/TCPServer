@@ -145,13 +145,14 @@ void *thread_pool_helper(void *)
         pthread_mutex_lock(&mutex_job_queue);
         if (!job_queue.empty())
         {
-            int client = job_queue.front();
-            job_queue.pop();
-            pthread_mutex_unlock(&mutex_job_queue);
-
+            
             pthread_mutex_lock(&mutex_datastore);
             if (actual_count < MAX_THREADS)
             {
+            	int client = job_queue.front();
+            	job_queue.pop();
+            	pthread_mutex_unlock(&mutex_job_queue);
+
                 pthread_t thread;
                 pthread_create(&thread, NULL, &handle_client, &client);
                 actual_count++;
@@ -202,7 +203,8 @@ int main(int argc, char *argv[])
 
     pthread_t thread_pool_thread;
     pthread_create(&thread_pool_thread, NULL, &thread_pool_helper, NULL);
-
+	vector <int> socketss;
+	int counter = 0;
     while (true)
     {
         client_socket = accept(server_socket, NULL, NULL);
@@ -211,12 +213,12 @@ int main(int argc, char *argv[])
             perror("Accept failed");
             return -1;
         }
-
+		socketss.push_back(client_socket);
         pthread_mutex_lock(&mutex_datastore);
         if (actual_count < MAX_THREADS)
         {
             pthread_t thread;
-            pthread_create(&thread, NULL, &handle_client, &client_socket);
+            pthread_create(&thread, NULL, &handle_client, &socketss[counter++]);
             actual_count++;
         }
         else
