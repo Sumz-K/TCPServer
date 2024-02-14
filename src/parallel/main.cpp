@@ -11,17 +11,13 @@
 
 using namespace std;
 
-#define MAX_THREADS 20
-
+#define MAX_THREADS 10
 
 map<string, string> datastore;
 queue<int> job_queue;
-
-namespace ns{
-    pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-}
-int actual_count = 0;
-
+pthread_mutex_t mutex_datastore = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex_job_queue = PTHREAD_MUTEX_INITIALIZER;
+int actual_count=0;
 void *handle_client(void *arg)
 {
     int client_socket = *((int *)arg);
@@ -42,107 +38,92 @@ void *handle_client(void *arg)
 
             if (request_line.find("WRITE") != -1)
             {
-                string request_key,request_value;
-                string method=tokens[i];    
-                request_key = tokens[i+1];
-                request_value=tokens[i+2];
-                i+=2;
-                //cout << "Request Line: " << request_line << endl;
+                string request_key, request_value;
+                string method = tokens[i];
+                request_key = tokens[i + 1];
+                request_value = tokens[i + 2];
+                i += 2;
 
                 istringstream iss(request_key);
-                string  key,value;
-                
+                string key, value;
                 iss >> key;
 
-                
                 request_value.erase(request_value.begin(), request_value.begin() + 1);
-                value=request_value;
+                value = request_value;
 
-                pthread_mutex_lock(&ns::mutex);
+                pthread_mutex_lock(&mutex_datastore);
                 datastore[key] = value;
-                pthread_mutex_unlock(&ns::mutex);
+                pthread_mutex_unlock(&mutex_datastore);
 
-                
-    
-                
                 string response = "FIN\n";
                 send(client_socket, response.c_str(), response.length(), 0);
             }
             else if (request_line.find("READ") != -1)
             {
-                string method=tokens[i];
-                request_line=tokens[i+1];
-                i+=1;
+                string method = tokens[i];
+                request_line = tokens[i + 1];
+                i += 1;
                 istringstream iss(request_line);
                 string key;
-
                 iss >> key;
-                // cout << "Method: " << method << endl;
-                // cout << "Key: " << key << endl;
-                string value;
-                if (datastore.find(key) != datastore.end())
-                    {
-                        value = datastore[key];
-                        //cout << value << "\n";
 
-                        string response = value+"\n";
-                        send(client_socket, response.c_str(), response.length(), 0);
-                    }
+                string value;
+                pthread_mutex_lock(&mutex_datastore);
+                if (datastore.find(key) != datastore.end())
+                {
+                    value = datastore[key];
+                    string response = value + "\n";
+                    send(client_socket, response.c_str(), response.length(), 0);
+                }
                 else
-                    {
-                        //cout << "NULL\n";
-                        string response = "NULL\n";
-                        send(client_socket, response.c_str(), response.length(), 0);
-                    }
+                {
+                    string response = "NULL\n";
+                    send(client_socket, response.c_str(), response.length(), 0);
+                }
+                pthread_mutex_unlock(&mutex_datastore);
             }
             else if (request_line.find("COUNT") != -1)
             {
-                pthread_mutex_lock(&ns::mutex);
+                pthread_mutex_lock(&mutex_datastore);
                 int count = datastore.size();
-                pthread_mutex_unlock(&ns::mutex);
-                string countstr=to_string(count);
-                string response=countstr+"\n" ;
-                send(client_socket,response.c_str(),response.length(),0);
+                pthread_mutex_unlock(&mutex_datastore);
+                string countstr = to_string(count);
+                string response = countstr + "\n";
+                send(client_socket, response.c_str(), response.length(), 0);
             }
             else if (request_line.find("DELETE") != -1)
             {
-                string method=tokens[i];
-                request_line=tokens[i+1];
-                i+=1;
-
+                string method = tokens[i];
+                request_line = tokens[i + 1];
+                i += 1;
                 istringstream iss(request_line);
                 string key;
+                iss >> key;
 
-                iss>>key;
-
-                
-
-      
                 string response;
-                pthread_mutex_lock(&ns::mutex);
-                int erased=datastore.erase(key);
-                if(erased){
-                    response="FIN\n" ;
-                    send(client_socket,response.c_str(),response.length(),0);
+                pthread_mutex_lock(&mutex_datastore);
+                int erased = datastore.erase(key);
+                if (erased)
+                {
+                    response = "FIN\n";
+                    send(client_socket, response.c_str(), response.length(), 0);
                 }
-                else{
-                    response="NULL\n" ;
-                    send(client_socket,response.c_str(),response.length(),0);
+                else
+                {
+                    response = "NULL\n";
+                    send(client_socket, response.c_str(), response.length(), 0);
                 }
-                pthread_mutex_unlock(&ns::mutex);
-                
-                
+                pthread_mutex_unlock(&mutex_datastore);
             }
             else if (request_line.find("END") != -1)
             {
-               
-                pthread_mutex_lock(&ns::mutex);
+              	pthread_mutex_lock(&mutex_datastore);
                 actual_count--;
-                
+
                 string response="\n";
                 send(client_socket, response.c_str(), response.length(), 0);
                 close(client_socket);
-                pthread_mutex_unlock(&ns::mutex);
+                pthread_mutex_unlock(&mutex_datastore);
                 pthread_exit(NULL);
             }
             else
@@ -154,9 +135,6 @@ void *handle_client(void *arg)
         memset(buffer, 0, sizeof(buffer));
     }
     close(client_socket);
-    pthread_mutex_lock(&ns::mutex);
-    actual_count--;
-    pthread_mutex_unlock(&ns::mutex);
     pthread_exit(NULL);
 }
 
@@ -164,31 +142,39 @@ void *thread_pool_helper(void *)
 {
     while (true)
     {
+        pthread_mutex_lock(&mutex_job_queue);
         if (!job_queue.empty())
         {
-            pthread_mutex_lock(&ns::mutex);
+            int client = job_queue.front();
+            job_queue.pop();
+            pthread_mutex_unlock(&mutex_job_queue);
+
+            pthread_mutex_lock(&mutex_datastore);
             if (actual_count < MAX_THREADS)
             {
-                int client = job_queue.front();
-                job_queue.pop();
                 pthread_t thread;
                 pthread_create(&thread, NULL, &handle_client, &client);
                 actual_count++;
             }
-            pthread_mutex_unlock(&ns::mutex);
+            pthread_mutex_unlock(&mutex_datastore);
+        }
+        else
+        {
+            pthread_mutex_unlock(&mutex_job_queue);
+            usleep(1000);
         }
     }
 }
 
-int main(int argc, char*argv[])
+int main(int argc, char *argv[])
 {
     int portno;
-    if (argc != 2) {
+    if (argc != 2)
+    {
         fprintf(stderr, "usage: %s <port>\n", argv[0]);
         exit(1);
     }
 
- 
     portno = atoi(argv[1]);
 
     int server_socket, client_socket;
@@ -203,11 +189,9 @@ int main(int argc, char*argv[])
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(portno);
-    // int reuse=1;
-    // setsockopt(server_socket,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
 
     bind(server_socket, (struct sockaddr *)&address, sizeof(address));
-    
+
     if (listen(server_socket, 100) < 0)
     {
         perror("Listen failed");
@@ -228,7 +212,7 @@ int main(int argc, char*argv[])
             return -1;
         }
 
-        pthread_mutex_lock(&ns::mutex);
+        pthread_mutex_lock(&mutex_datastore);
         if (actual_count < MAX_THREADS)
         {
             pthread_t thread;
@@ -239,7 +223,7 @@ int main(int argc, char*argv[])
         {
             job_queue.push(client_socket);
         }
-        pthread_mutex_unlock(&ns::mutex);
+        pthread_mutex_unlock(&mutex_datastore);
     }
 
     close(server_socket);
