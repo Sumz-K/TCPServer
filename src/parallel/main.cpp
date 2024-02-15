@@ -11,7 +11,7 @@
 
 using namespace std;
 
-#define MAX_THREADS 5
+#define MAX_THREADS 7
 
 map<string, string> datastore;
 queue<int> job_queue;
