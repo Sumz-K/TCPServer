@@ -155,7 +155,7 @@ void *handle_client(void *arg)
 
 void *thread_pool_helper(void *args)
 {
-printf("hey baby");
+
     struct Helper *hlp = static_cast<Helper *>(args);
 
     struct Thread * thread_pool=hlp->thread_arr;
